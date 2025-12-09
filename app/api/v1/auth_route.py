@@ -14,7 +14,9 @@ from app.core.config import settings
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.models.user import User
+from app.models.wallet import Wallet
 from app.schemas.user import AuthResponse, UserCreate, UserResponse
+from app.utils.wallet import generate_unique_wallet_number
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -168,8 +170,38 @@ async def google_auth_callback(
             await db.commit()
             await db.refresh(user)
             logger.info(f"Created new user: {user.id}")
+
+            # Auto-create wallet for new user
+            wallet_number = await generate_unique_wallet_number(db)
+            wallet = Wallet(
+                user_id=user.id,
+                wallet_number=wallet_number
+            )
+            db.add(wallet)
+            await db.commit()
+            await db.refresh(wallet)
+            logger.info(f"Auto-created wallet {wallet_number} for user: {user.id}")
+
         else:
             logger.info(f"Found existing user: {user.id}")
+
+            # Check if user has wallet
+            result = await db.execute(
+                select(Wallet).where(Wallet.user_id == user.id)
+            )
+            wallet = result.scalars().first()
+
+            if not wallet:
+                # Auto-create wallet for existing user without one
+                wallet_number = await generate_unique_wallet_number(db)
+                wallet = Wallet(
+                    user_id=user.id,
+                    wallet_number=wallet_number
+                )
+                db.add(wallet)
+                await db.commit()
+                await db.refresh(wallet)
+                logger.info(f"Auto-created wallet {wallet_number} for existing user: {user.id}")
 
         # Create JWT token
         jwt_token = create_access_token(data={"sub": user.google_sub})
