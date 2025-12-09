@@ -1,8 +1,4 @@
-"""
-API Key model for secure service-to-service authentication.
 
-Enhanced model with permissions, expiry, and max active keys enforcement.
-"""
 
 import uuid
 from datetime import datetime
@@ -27,7 +23,7 @@ class APIKey(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     hashed_key = Column(String, unique=True, nullable=False, index=True)
-    permissions = Column(JSON, default=list, nullable=False)  # List of permission strings
+    permissions = Column(JSON, default=list, nullable=False) 
     expires_at = Column(DateTime(timezone=True), nullable=False)
     revoked = Column(Boolean, default=False, nullable=False)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
@@ -42,7 +38,10 @@ class APIKey(Base):
 
     def is_expired(self) -> bool:
         """Check if the API key has expired."""
-        return datetime.utcnow() >= self.expires_at.replace(tzinfo=None)
+        from datetime import timezone
+        # expires_at is timezone-aware, so compare with UTC now
+        utc_now = datetime.now(timezone.utc)
+        return utc_now >= self.expires_at
 
     def is_active(self) -> bool:
         """Check if the API key is active (not revoked and not expired)."""
@@ -54,5 +53,6 @@ class APIKey(Base):
 
     def revoke(self) -> None:
         """Revoke the API key."""
+        from datetime import timezone
         self.revoked = True
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(timezone.utc)

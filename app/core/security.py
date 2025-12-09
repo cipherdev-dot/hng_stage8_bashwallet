@@ -1,11 +1,27 @@
 
 
+import hashlib
+import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+import argon2
 from jose import JWTError, jwt
 
 from app.core.config import settings
+
+
+# Set up argon2 hasher
+ph = argon2.PasswordHasher(
+    time_cost=3,
+    memory_cost=65536,
+    parallelism=4,
+    hash_len=32,
+    salt_len=16,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -44,3 +60,60 @@ def verify_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def generate_api_key() -> str:
+    """
+    Generate a new secure API key with prefix.
+
+    Creates a live/test key with format: sk_live_<32-char-secret> or sk_test_<32-char-secret>
+
+    Returns:
+        str: Generated API key (not hashed yet).
+    """
+    # Generate 32-character secure random string
+    secret_part = secrets.token_urlsafe(32)
+
+    # For now, generate live keys (can be made configurable)
+    prefix = "sk_live_"
+
+    return f"{prefix}{secret_part}"
+
+
+def hash_api_key(api_key: str) -> str:
+    """
+    Hash an API key using bcrypt (via argon2).
+
+    Args:
+        api_key: The raw API key to hash.
+
+    Returns:
+        str: Bcrypt hash of the API key.
+    """
+    try:
+        hashed = ph.hash(api_key)
+        return hashed
+    except Exception as e:
+        logger.error(f"Failed to hash API key: {e}")
+        raise
+
+
+def verify_api_key(plain_key: str, hashed_key: str) -> bool:
+    """
+    Verify an API key against its hash using constant-time comparison.
+
+    Args:
+        plain_key: The plain API key.
+        hashed_key: The stored hash.
+
+    Returns:
+        bool: True if the key matches the hash.
+    """
+    try:
+        ph.verify(hashed_key, plain_key)
+        return True
+    except argon2.exceptions.VerifyMismatchError:
+        return False
+    except Exception as e:
+        logger.error(f"Failed to verify API key: {e}")
+        return False
