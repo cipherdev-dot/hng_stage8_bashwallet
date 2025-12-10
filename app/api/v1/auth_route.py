@@ -1,4 +1,3 @@
-
 import logging
 import secrets
 from typing import Optional
@@ -42,7 +41,7 @@ def _get_google_auth_url(state: str) -> str:
         "response_type": "code",
         "state": state,
         "access_type": "offline",
-        "prompt": "consent"
+        "prompt": "consent",
     }
     query_string = "&".join(f"{k}={v}" for k, v in params.items())
     return f"{base_url}?{query_string}"
@@ -74,7 +73,7 @@ async def google_auth_callback(
     code: str,
     state: Optional[str] = None,
     error: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Handle Google OAuth2 callback.
@@ -91,20 +90,18 @@ async def google_auth_callback(
     """
     if error:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"OAuth error: {error}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"OAuth error: {error}"
         )
 
     if not code:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Authorization code missing"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Authorization code missing"
         )
 
     if not settings.google_client_id or not settings.google_client_secret:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google OAuth2 not properly configured"
+            detail="Google OAuth2 not properly configured",
         )
 
     try:
@@ -130,7 +127,7 @@ async def google_auth_callback(
         if not id_token_value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ID token missing from response"
+                detail="ID token missing from response",
             )
 
         # Verify the ID token with Google's servers
@@ -140,7 +137,7 @@ async def google_auth_callback(
             id_token_value,
             request_obj,
             settings.google_client_id,
-            clock_skew_in_seconds=10  
+            clock_skew_in_seconds=10,
         )
 
         # Extract user info from verified token
@@ -152,18 +149,13 @@ async def google_auth_callback(
         logger.info(f"OAuth callback for user with Google sub: {google_sub}")
 
         # Check if user exists
-        result = await db.execute(
-            select(User).where(User.google_sub == google_sub)
-        )
+        result = await db.execute(select(User).where(User.google_sub == google_sub))
         user = result.scalars().first()
 
         if not user:
             # Create new user
             user_data = UserCreate(
-                google_sub=google_sub,
-                email=email,
-                name=name,
-                picture=picture
+                google_sub=google_sub, email=email, name=name, picture=picture
             )
             user = User(**user_data.model_dump())
             db.add(user)
@@ -173,10 +165,7 @@ async def google_auth_callback(
 
             # Auto-create wallet for new user
             wallet_number = await generate_unique_wallet_number(db)
-            wallet = Wallet(
-                user_id=user.id,
-                wallet_number=wallet_number
-            )
+            wallet = Wallet(user_id=user.id, wallet_number=wallet_number)
             db.add(wallet)
             await db.commit()
             await db.refresh(wallet)
@@ -186,22 +175,19 @@ async def google_auth_callback(
             logger.info(f"Found existing user: {user.id}")
 
             # Check if user has wallet
-            result = await db.execute(
-                select(Wallet).where(Wallet.user_id == user.id)
-            )
+            result = await db.execute(select(Wallet).where(Wallet.user_id == user.id))
             wallet = result.scalars().first()
 
             if not wallet:
                 # Auto-create wallet for existing user without one
                 wallet_number = await generate_unique_wallet_number(db)
-                wallet = Wallet(
-                    user_id=user.id,
-                    wallet_number=wallet_number
-                )
+                wallet = Wallet(user_id=user.id, wallet_number=wallet_number)
                 db.add(wallet)
                 await db.commit()
                 await db.refresh(wallet)
-                logger.info(f"Auto-created wallet {wallet_number} for existing user: {user.id}")
+                logger.info(
+                    f"Auto-created wallet {wallet_number} for existing user: {user.id}"
+                )
 
         # Create JWT token
         jwt_token = create_access_token(data={"sub": user.google_sub})
@@ -213,19 +199,16 @@ async def google_auth_callback(
             "email": user.email,
             "name": user.name,
             "picture": user.picture,
-            "created_at": user.created_at
+            "created_at": user.created_at,
         }
 
         # Return auth response
         user_response = UserResponse.model_validate(user_dict)
         logger.info(f"Successfully issued JWT token for user: {user.id}")
-        return AuthResponse(
-            access_token=jwt_token,
-            user=user_response
-        )
+        return AuthResponse(access_token=jwt_token, user=user_response)
 
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"OAuth verification failed: {str(e)}"
+            detail=f"OAuth verification failed: {str(e)}",
         )

@@ -63,7 +63,7 @@ class Transaction(Base):
     fee_amount = Column(Numeric(precision=10, scale=2), default=Decimal('0.00'), nullable=False)
 
     # Metadata storage (JSON for flexible data like Paystack response, transfer details, etc.)
-    metadata = Column(JSON, nullable=True)
+    transaction_metadata = Column(JSON, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -91,10 +91,10 @@ class Transaction(Base):
             reason: Optional reason for failure.
         """
         self.status = TransactionStatus.FAILED
-        if reason and self.metadata:
-            self.metadata = {**self.metadata, "failure_reason": reason}
+        if reason and self.transaction_metadata:
+            self.transaction_metadata = {**self.transaction_metadata, "failure_reason": reason}
         elif reason:
-            self.metadata = {"failure_reason": reason}
+            self.transaction_metadata = {"failure_reason": reason}
 
     def mark_cancelled(self) -> None:
         """

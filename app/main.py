@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.auth_route import auth_router
 from app.api.v1.key_route import keys_router
+from app.api.v1.wallet import wallet_router
 from app.core.config import settings
 from app.db.session import init_db
 
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(keys_router, prefix="/api/v1/keys", tags=["api-keys"])
+    app.include_router(wallet_router, prefix="/api/v1/wallet", tags=["wallet"])
 
     # Health check endpoint
     @app.get("/health")
