@@ -1,0 +1,15 @@
+name: Call URL Every 10 Minutes
+on:
+  schedule:
+    # Runs at every 10th minute
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # allows manual triggering
+jobs:
+  call-url:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the URL
+        run: |
+          URL="https://hng-stage8-bashwallet.onrender.com/"
+          echo "Calling $URL ..."
+          curl -X GET "$URL" -s -o /dev/null -w "%{http_code}\n"
