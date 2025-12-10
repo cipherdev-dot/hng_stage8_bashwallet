@@ -6,8 +6,9 @@ python-jose[cryptography]==3.3.0
 httpx==0.25.2
 passlib[argon2]==1.7.4
 python-multipart==0.0.6
-pydantic==2.5.0
+pydantic==2.5.3
 pydantic-settings==2.1.0
 google-auth==2.24.0
 python-decouple==3.8
 python-dateutil==2.8.2
+pydantic-core==2.14.6
