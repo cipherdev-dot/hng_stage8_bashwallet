@@ -9,9 +9,18 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.schemas.wallet_schemas import BalanceResponse, DepositRequest, DepositResponse
+from app.schemas.wallet_schemas import (
+    BalanceResponse,
+    DepositRequest,
+    DepositResponse,
+    TransferRequest,
+    TransferResponse,
+    TransactionHistoryResponse,
+    TransactionResponse,
+)
 from app.services.api_key_service import APIKeyService
 from app.services.paystack_service import PaystackService
+from app.services.transfer_service import TransferService
 from app.utils.paystack_webhook import verify_paystack_webhook_signature
 
 
@@ -290,6 +299,228 @@ async def get_wallet_balance(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to retrieve wallet balance",
+        )
+
+
+@wallet_router.post("/transfer", response_model=TransferResponse)
+async def transfer_funds(
+    transfer_data: TransferRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Transfer funds between wallets.
+
+    Supports both JWT and API key authentication.
+    Uses atomic database transactions for consistency.
+
+    Args:
+        transfer_data: Transfer request with recipient and amount.
+        request: HTTP request for auth detection.
+        db: Database session.
+
+    Returns:
+        TransferResponse: Transfer completion details.
+
+    Raises:
+        HTTPException: For validation errors or transfer failures.
+    """
+    # Get authenticated user
+    auth_user = None
+
+    if request.headers.get("x-api-key"):
+        api_key_obj, api_key_user = await APIKeyService.validate_api_key(request.headers.get("x-api-key"), db)
+        if not api_key_user or not api_key_obj:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key"
+            )
+        if "wallet:write" not in api_key_obj.permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API key does not have wallet:write permission",
+            )
+        auth_user = api_key_user
+    else:
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+            )
+
+        token = auth_header[7:]
+        from app.core.security import verify_token
+        token_data = verify_token(token)
+        user_sub = token_data.get("sub")
+
+        if not user_sub:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+            )
+
+        from sqlalchemy.future import select
+        from app.models.user import User
+        result = await db.execute(
+            select(User).where(User.google_sub == user_sub)
+        )
+        auth_user = result.scalars().first()
+
+        if not auth_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+            )
+
+    try:
+        # Get sender wallet
+        from sqlalchemy.future import select
+        from app.models.wallet import Wallet
+
+        sender_wallet_result = await db.execute(
+            select(Wallet).where(Wallet.user_id == auth_user.id)
+        )
+        sender_wallet = sender_wallet_result.scalars().first()
+
+        if not sender_wallet:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sender wallet not found",
+            )
+
+        # Find recipient wallet
+        recipient_wallet = await TransferService.find_recipient_wallet(
+            recipient_wallet_number=transfer_data.recipient_wallet_number,
+            db=db
+        )
+
+        if not recipient_wallet:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Recipient wallet not found",
+            )
+
+        # Execute transfer
+        transfer_response = await TransferService.execute_transfer(
+            sender_wallet=sender_wallet,
+            recipient_wallet=recipient_wallet,
+            amount=transfer_data.amount,
+            description=transfer_data.description,
+            db=db
+        )
+
+        logger.info(f"Transfer completed: {auth_user.id} transferred ₦{transfer_data.amount}")
+        return transfer_response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        user_id = getattr(auth_user, "id", "unknown")
+        logger.error(f"Transfer failed for user {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Transfer failed: {str(e)}"
+        )
+
+
+@wallet_router.get("/transactions", response_model=TransactionHistoryResponse)
+async def get_transaction_history(
+    request: Request,
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get user's transaction history.
+
+    Supports both JWT and API key authentication.
+    Includes pagination for large transaction lists.
+
+    Args:
+        request: HTTP request for auth detection.
+        skip: Number of transactions to skip (pagination).
+        limit: Maximum transactions to return.
+        db: Database session.
+
+    Returns:
+        TransactionHistoryResponse: Paginated transaction history.
+
+    Raises:
+        HTTPException: If authentication fails.
+    """
+    # Get authenticated user
+    auth_user = None
+
+    if request.headers.get("x-api-key"):
+        api_key_obj, api_key_user = await APIKeyService.validate_api_key(request.headers.get("x-api-key"), db)
+        if not api_key_user or not api_key_obj:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key"
+            )
+        auth_user = api_key_user
+    else:
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+            )
+
+        token = auth_header[7:]
+        from app.core.security import verify_token
+        token_data = verify_token(token)
+        user_sub = token_data.get("sub")
+
+        if not user_sub:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+            )
+
+        from sqlalchemy.future import select
+        from app.models.user import User
+        result = await db.execute(
+            select(User).where(User.google_sub == user_sub)
+        )
+        auth_user = result.scalars().first()
+
+        if not auth_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+            )
+
+    try:
+        # Get transaction history
+        total, transactions = await TransferService.get_user_transactions(
+            user_id=auth_user.id,
+            db=db,
+            skip=skip,
+            limit=limit
+        )
+
+        # Convert to response model
+        transaction_responses = []
+        for transaction in transactions:
+            transaction_responses.append(
+                TransactionResponse(
+                    id=str(transaction.id),
+                    user_id=str(transaction.user_id),
+                    transaction_type=transaction.transaction_type.value if hasattr(transaction.transaction_type, 'value') else str(transaction.transaction_type),
+                    amount=str(transaction.amount),
+                    description=transaction.description,
+                    status=transaction.status.value if hasattr(transaction.status, 'value') else str(transaction.status),
+                    reference=transaction.reference,
+                    created_at=transaction.created_at
+                )
+            )
+
+        logger.info(f"Retrieved {len(transaction_responses)} transactions for user {auth_user.id}")
+        return TransactionHistoryResponse(
+            total=total,
+            transactions=transaction_responses
+        )
+
+    except Exception as e:
+        user_id = getattr(auth_user, "id", "unknown")
+        logger.error(f"Failed to get transactions for user {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve transaction history",
         )
 
 
