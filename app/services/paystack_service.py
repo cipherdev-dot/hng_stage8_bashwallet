@@ -133,18 +133,17 @@ class PaystackService:
         paystack_client = get_paystack_client()
 
         try:
-            async with paystack_client:
-                paystack_response = await paystack_client.initialize_transaction(
-                    amount=amount_kobo,
-                    email=user.email,
-                    reference=reference,
-                    callback_url=callback_url,
-                    metadata={
-                        "transaction_id": str(transaction.id),
-                        "user_id": str(user.id),
-                        "wallet_number": None  # We'll get this from the endpoint
-                    }
-                )
+            paystack_response = await paystack_client.initialize_transaction(
+                amount=amount_kobo,
+                email=user.email,
+                reference=reference,
+                callback_url=callback_url,
+                metadata={
+                    "transaction_id": str(transaction.id),
+                    "user_id": str(user.id),
+                    "wallet_number": None  # We'll get this from the endpoint
+                }
+            )
 
             logger.info(f"Initialized Paystack deposit for user {user.id}: ref {reference}")
             return paystack_response
@@ -181,8 +180,7 @@ class PaystackService:
         """
         paystack_client = get_paystack_client()
 
-        async with paystack_client:
-            verification_response = await paystack_client.verify_transaction(reference)
+        verification_response = await paystack_client.verify_transaction(reference)
 
         # Log verification (webhook will handle the actual processing)
         logger.info(f"Verified Paystack transaction: {reference}")

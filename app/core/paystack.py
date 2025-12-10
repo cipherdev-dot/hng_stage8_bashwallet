@@ -34,12 +34,8 @@ class PaystackClient:
             timeout=30.0, 
         )
 
-    async def __aenter__(self):
-        """Async context manager entry."""
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
+    async def close(self):
+        """Manually close the HTTP client."""
         await self.client.aclose()
 
     def _handle_response(self, response: httpx.Response) -> Dict[str, Any]:
