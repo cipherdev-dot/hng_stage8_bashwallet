@@ -228,6 +228,7 @@ class PaystackService:
         if not transaction:
             logger.error(f"Transaction not found for reference: {reference}")
             return False
+        
 
         # Check if already processed 
         if transaction.status == TransactionStatus.COMPLETED:

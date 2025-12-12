@@ -245,7 +245,7 @@ async def get_wallet_balance(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
             )
 
-        token = auth_header[7:]  # Remove "Bearer " prefix
+        token = auth_header[7:]  # Remove "Bearer " 
         from app.core.security import verify_token
         token_data = verify_token(token)
         user_sub = token_data.get("sub")
@@ -350,11 +350,15 @@ async def transfer_funds(
         token = auth_header[7:]
         from app.core.security import verify_token
         token_data = verify_token(token)
-        user_sub = token_data.get("sub")
+        if not token_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired JWT token"
+            )
 
+        user_sub = token_data.get("sub")
         if not user_sub:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"
             )
 
         from sqlalchemy.future import select

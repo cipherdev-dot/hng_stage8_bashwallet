@@ -70,11 +70,13 @@ class TransferService:
         # Create debit transaction (sender)
         debit_transaction = Transaction(
             user_id=sender_wallet.user_id,
-            transaction_type=TransactionType.TRANSFER_DEBIT,
+            transaction_type=TransactionType.TRANSFER,
             amount=amount,
             description=description or "Wallet transfer sent",
             reference=transfer_reference,
             status=TransactionStatus.PENDING,
+            source_wallet_id=sender_wallet.id,
+            destination_wallet_id=recipient_wallet.id,
             transaction_metadata={
                 "recipient_wallet": recipient_wallet.wallet_number,
                 "transfer_type": "debit"
@@ -84,11 +86,13 @@ class TransferService:
         # Create credit transaction (recipient)
         credit_transaction = Transaction(
             user_id=recipient_wallet.user_id,
-            transaction_type=TransactionType.TRANSFER_CREDIT,
+            transaction_type=TransactionType.TRANSFER,
             amount=amount,
             description=description or "Wallet transfer received",
             reference=transfer_reference,
             status=TransactionStatus.PENDING,
+            source_wallet_id=sender_wallet.id,
+            destination_wallet_id=recipient_wallet.id,
             transaction_metadata={
                 "sender_wallet": sender_wallet.wallet_number,
                 "transfer_type": "credit"
@@ -142,43 +146,39 @@ class TransferService:
         if sender_wallet.id == recipient_wallet.id:
             raise Exception("Cannot transfer to your own wallet")
 
-        # Use atomic transaction for consistency
-        async with db.begin():
-            try:
-                # Create transfer transactions
-                debit_transaction, credit_transaction = await TransferService.create_transfer_transaction(
-                    sender_wallet=sender_wallet,
-                    recipient_wallet=recipient_wallet,
-                    amount=amount,
-                    description=description,
-                    db=db
-                )
+        try:
+            # Create transfer transactions
+            debit_transaction, credit_transaction = await TransferService.create_transfer_transaction(
+                sender_wallet=sender_wallet,
+                recipient_wallet=recipient_wallet,
+                amount=amount,
+                description=description,
+                db=db
+            )
 
-                # Execute the transfer atomically
-                sender_wallet.debit_balance(amount)
-                recipient_wallet.credit_balance(amount)
+            # Execute the transfer
+            sender_wallet.debit_balance(amount)
+            recipient_wallet.credit_balance(amount)
 
-                # Mark transactions as completed
-                debit_transaction.mark_completed()
-                credit_transaction.mark_completed()
+            # Mark transactions as completed
+            debit_transaction.mark_completed()
+            credit_transaction.mark_completed()
 
-                await db.commit()
+            # Note: Let the FastAPI dependency handle commit/rollback
+            logger.info(f"Transfer completed: {sender_wallet.wallet_number} sent ₦{amount} to {recipient_wallet.wallet_number}")
 
-                logger.info(f"Transfer completed: {sender_wallet.wallet_number} sent ₦{amount} to {recipient_wallet.wallet_number}")
+            return TransferResponse(
+                transaction_id=str(debit_transaction.id),
+                sender_wallet=sender_wallet.wallet_number,
+                recipient_wallet=recipient_wallet.wallet_number,
+                amount=amount,
+                description=description,
+                message=f"Successfully transferred ₦{amount} to {recipient_wallet.wallet_number}"
+            )
 
-                return TransferResponse(
-                    transaction_id=str(debit_transaction.id),
-                    sender_wallet=sender_wallet.wallet_number,
-                    recipient_wallet=recipient_wallet.wallet_number,
-                    amount=amount,
-                    description=description,
-                    message=f"Successfully transferred ₦{amount} to {recipient_wallet.wallet_number}"
-                )
-
-            except Exception as e:
-                logger.error(f"Transfer failed: {e}")
-                # Transactions will be rolled back automatically on exception
-                raise Exception(f"Transfer failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Transfer failed: {e}")
+            raise Exception(f"Transfer failed: {str(e)}")
 
     @staticmethod
     async def get_user_transactions(
